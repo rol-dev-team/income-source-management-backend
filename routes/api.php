@@ -37,6 +37,11 @@ use App\Http\Controllers\RentalPostingController;
 use App\Http\Controllers\RentalHousePartyMappingController;
 use App\Http\Controllers\RentalMappingController;
 
+
+
+Route::get('/payment-channel-summary', [CurrencyPostingsController::class, 'paymentChannelSummary']);
+Route::get('/channel-currency-matrix', [CurrencyPostingsController::class, 'channelCurrencyMatrix']);
+
 // Route::get('/ledger-summary-inc', [IncomeExpenseLedgerController::class, 'getLedgerDataSummary']);
 Route::get('/ledger-summary', [InvestmentPostingController::class, 'getInvestmentLedgerDataSummary']);
 

@@ -16,6 +16,102 @@ class CurrencyPostingsController extends Controller
 
 
 
+
+    public function paymentChannelSummary(Request $request)
+    {
+        $query = DB::table('currency_postings as cp')
+            ->leftJoin('payment_channel_details as pd', 'cp.payment_channel_id', '=', 'pd.id')
+            ->select(
+                'cp.payment_channel_id',
+                'pd.method_name',
+                DB::raw("SUM(CASE WHEN cp.transaction_type = 'buy' THEN cp.currency_amount ELSE 0 END) AS total_buy"),
+                DB::raw("SUM(CASE WHEN cp.transaction_type = 'sell' THEN cp.currency_amount ELSE 0 END) AS total_sell"),
+                DB::raw("(SUM(CASE WHEN cp.transaction_type = 'buy' THEN cp.currency_amount ELSE 0 END) -
+                        SUM(CASE WHEN cp.transaction_type = 'sell' THEN cp.currency_amount ELSE 0 END)) AS net_amount")
+            )
+            ->where('cp.status', 'approved')
+            ->where('cp.business_type_id', 2)
+            ->whereIn('cp.transaction_type', ['buy', 'sell']);
+
+        // 🔥 Dynamic filter: currency_id
+        if ($request->filled('currency_id')) {
+            $query->where('cp.currency_id', $request->currency_id);
+        }
+
+        // 🔥 Optional date filter (recommended)
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $query->whereBetween('cp.posting_date', [
+                $request->start_date . ' 00:00:00',
+                $request->end_date . ' 23:59:59'
+            ]);
+        }
+
+        $data = $query
+            ->groupBy('cp.payment_channel_id', 'pd.method_name')
+            ->orderBy('cp.payment_channel_id')
+            ->get();
+
+        return response()->json([
+            'status' => true,
+            'data'   => $data
+        ]);
+    }
+
+    public function channelCurrencyMatrix(Request $request)
+    {
+        $query = DB::table('currency_postings as cp')
+            ->leftJoin('payment_channel_details as pd', 'cp.payment_channel_id', '=', 'pd.id')
+            ->leftJoin('currencies as c', 'cp.currency_id', '=', 'c.id')
+            ->select(
+                'cp.payment_channel_id',
+                'pd.method_name',
+                'cp.currency_id',
+                'c.currency as currency_code',
+                DB::raw("SUM(CASE WHEN cp.transaction_type = 'buy' THEN cp.currency_amount ELSE 0 END) -
+                        SUM(CASE WHEN cp.transaction_type = 'sell' THEN cp.currency_amount ELSE 0 END) AS net_amount")
+            )
+            ->where('cp.status', 'approved')
+            ->where('cp.business_type_id', 2)
+            ->whereIn('cp.transaction_type', ['buy', 'sell']);
+
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $query->whereBetween('cp.posting_date', [
+                $request->start_date . ' 00:00:00',
+                $request->end_date . ' 23:59:59'
+            ]);
+        }
+
+        if ($request->filled('currency_id')) {
+            $query->where('cp.currency_id', $request->currency_id);
+        }
+
+        $rows = $query
+            ->groupBy('cp.payment_channel_id', 'pd.method_name', 'cp.currency_id', 'c.currency')
+            ->orderBy('cp.payment_channel_id')
+            ->get();
+
+        // Get all unique currencies
+        $currencies = $rows->pluck('currency_code', 'currency_id')->unique();
+
+        // Get all unique channels
+        $channels = $rows->groupBy('payment_channel_id')->map(function ($group) {
+            return $group->first()->method_name;
+        });
+
+        // Build matrix: { payment_channel_id: { currency_code: net_amount } }
+        $matrix = [];
+        foreach ($rows as $row) {
+            $matrix[$row->payment_channel_id]['method_name'] = $row->method_name;
+            $matrix[$row->payment_channel_id]['balances'][$row->currency_code] = $row->net_amount;
+        }
+
+        return response()->json([
+            'status'     => true,
+            'currencies' => $currencies,         // e.g. { 1: "USD", 2: "EURO" }
+            'matrix'     => array_values($matrix) // rows with method_name + balances per currency
+        ]);
+    }
+
     public function index(Request $request)
     {
         $pageSize = $request->input('pageSize', 10);
